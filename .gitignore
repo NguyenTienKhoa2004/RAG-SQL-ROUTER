@@ -1,0 +1,32 @@
+# Python environments and caches
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Local secrets
+.env
+.env.*
+!.env.example
+.streamlit/secrets.toml
+
+# Runtime storage and logs
+volumes/
+*.log
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
+
+# Notebook checkpoints and build output
+.ipynb_checkpoints/
+build/
+dist/
+*.egg-info/
+
+# Operating system files
+.DS_Store
+Thumbs.db

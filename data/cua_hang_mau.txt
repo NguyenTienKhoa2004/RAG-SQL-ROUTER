@@ -1,0 +1,23 @@
+# Tai lieu mau: Cua hang Sao Mai
+
+Đây là dữ liệu giả lập để học và thử nghiệm RAG, không phải thông tin của một cửa hàng thật.
+
+## Giờ mở cửa
+
+Cửa hàng Sao Mai mở cửa từ 8:00 đến 20:00, từ thứ Hai đến thứ Bảy. Cửa hàng nghỉ vào Chủ nhật.
+
+## Giao hàng
+
+Cửa hàng giao hàng trong phạm vi Việt Nam. Thời gian giao hàng dự kiến là 3 đến 5 ngày làm việc sau khi xác nhận đơn hàng.
+
+Phí giao hàng là 30.000 đồng cho mỗi đơn. Đơn hàng có giá trị từ 700.000 đồng trở lên được miễn phí giao hàng.
+
+## Đổi trả
+
+Khách hàng có thể yêu cầu đổi trả trong vòng 7 ngày kể từ ngày nhận hàng. Sản phẩm phải chưa qua sử dụng, còn nguyên nhãn và có hóa đơn mua hàng.
+
+Sản phẩm bị lỗi do nhà sản xuất được đổi miễn phí. Cửa hàng không nhận đổi trả sản phẩm đã qua sử dụng.
+
+## Thanh toán
+
+Cửa hàng chấp nhận chuyển khoản ngân hàng và thanh toán khi nhận hàng.
