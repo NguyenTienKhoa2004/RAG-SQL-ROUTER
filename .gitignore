@@ -26,6 +26,9 @@ volumes/
 build/
 dist/
 *.egg-info/
+node_modules/
+frontend/dist/
+.cache/
 
 # Operating system files
 .DS_Store

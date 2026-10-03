@@ -1,73 +1,112 @@
-# RAG with SQL Router
+# Forma - RAG + SQL Workspace
 
-We are developing a system that will guide you in creating a custom agent. This agent can query either your Vector DB index for RAG-based retrieval or a separate SQL query engine. 
+A minimal React workspace for asking questions across uploaded documents and a SQL database. Python handles retrieval, tools and conversation state; React handles presentation and user interactions.
 
-## 🔍 **The Critical Component: Response Validation**
+## Architecture
 
-**While everyone is trying to build agents, no one tells you how to ensure their outputs are reliable.**
-
-**[Cleanlab Codex](https://help.cleanlab.ai/codex/)**, developed by researchers from MIT, offers a platform to evaluate and monitor any RAG or agentic app you're building. This system integrates Cleanlab Codex for automatic response validation, ensuring your AI outputs are trustworthy and continuously improving.
-
-### **Why Cleanlab Codex is Essential:**
-
-- **🔍 Automatic Detection**: Detects inaccurate/unhelpful responses from your AI automatically
-- **📈 Continuous Improvement**: Allows Subject Matter Experts to directly improve responses without engineering intervention  
-- **🎯 Trust Scoring**: Provides reliability metrics for every response
-- **🔄 Real-time Validation**: Validates queries and responses in real-time
-- **📊 Analytics**: Track improvement rates and response quality over time
-
-### **How It Works in This System:**
-
-1. **Query Processing**: Your queries are automatically validated by Cleanlab Codex
-2. **Response Validation**: AI responses are scored for reliability and accuracy
-3. **SME Intervention**: Subject Matter Experts can improve responses through the Codex interface
-4. **Continuous Learning**: The system learns from validated responses for future queries
-
-We use:
-
-- [Llama_Index](https://docs.llamaindex.ai/en/stable/) for orchestration
-- [Docling](https://docling-project.github.io/docling) for simplifying document processing
-- [Milvus](https://milvus.io/) to self-host a VectorDB
-- **[Cleanlab Codex](https://help.cleanlab.ai/codex/)** for **response validation and reliability assurance** ⭐
-- [OpenRouterAI](https://openrouter.ai/docs/quick-start) to access Alibaba's Qwen model
-
-> **💡 Key Insight**: While most tutorials focus on building agents, **[Cleanlab Codex](https://help.cleanlab.ai/codex/)** addresses the critical gap of ensuring those agents produce reliable, trustworthy outputs.
-
-## Set Up
-
-Follow these steps one by one:
-
-### Setup Milvus VectorDB
-
-Milvus provides an installation script to install it as a docker container.
-
-To install Milvus in Docker, you can use the following command:
-
-```bash
-curl -sfL https://raw.githubusercontent.com/milvus-io/milvus/master/scripts/standalone_embed.sh -o standalone_embed.sh
-
-bash standalone_embed.sh start
+```text
+frontend/src/
+  components/          Chat, sources, connection dialog, database browser
+  hooks/useWorkspace   Session and request state
+  lib/api              HTTP client
+  App.jsx              Workspace layout
+  styles.css           Responsive UI
+backend/
+  api.py               FastAPI routes and HTTP errors
+  schemas.py           Public request/response contracts
+  service.py           Session lifecycle, chat, upload and reset
+  serialization.py     Tool results as structured API data
+  database.py          Fixed read-only queries for the database browser
+  config.py            Environment configuration
+  rag/
+    workflow.py        LLM tool-selection loop and conversation history
+    tools.py           Document RAG and text-to-SQL tools
+    document_loading.py Text extraction and OCR fallback
+    retrieval_cache.py Cache of retrieved document nodes
+app.py                 Alias for the FastAPI application
 ```
 
-### Install Dependencies
+**Query flow:** React -> API -> session workflow -> SQL/document tools -> workflow final answer -> React. Tool results are returned separately and can be expanded in the chat. Each question starts a new tool lookup; prior conversation messages remain available to resolve follow-up references.
+
+**Document flow:** upload -> validate and stage files -> text extraction / OCR -> Markdown nodes -> embeddings -> Milvus -> document tool. A successful upload replaces the index and keeps chat history; a failed upload keeps the previous documents and workflow.
+
+## Run locally
+
+Requirements: Python 3.12+, uv, Node.js 20+ and npm. Keep `city_database.sqlite` in the project root, or configure `DATABASE_PATH`.
+
+### 1. Backend
+
+From the project root:
 
 ```bash
 uv sync
+uv run uvicorn backend.api:app --reload --host 127.0.0.1 --port 8000
 ```
 
-## Run the Notebook
+API docs: http://127.0.0.1:8000/docs. `uv run uvicorn app:app --reload` is also supported. Streamlit is no longer required.
 
-You can run the `notebook.ipynb` file to test the functionality of the code in a Jupyter Notebook environment. This notebook will help you understand routing, tool calling, and validating responses.
+Optionally copy `.env.example` to `.env` and set `OPENROUTER_API_KEY`. Otherwise enter your key in the React connection dialog. The browser stores only the opaque session ID in sessionStorage, never the API key. Credentials stay in backend memory for that session.
 
-## Run the Application
+### 2. Frontend
 
-To run the Streamlit app, use the following command:
+In another terminal:
 
 ```bash
-streamlit run app.py
+cd frontend
+npm ci
+npm run dev
 ```
 
-Open your browser and navigate to `http://localhost:8501` to access the app.
+Open http://127.0.0.1:5173. Vite proxies `/api` to port 8000. On Windows, use `npm.cmd` if PowerShell blocks `npm.ps1`.
+
+Connect the workspace, ask about cities, or add your documents through the sources panel. Enter sends a question; Shift + Enter adds a line. Starting a new conversation clears history and keeps uploaded documents. Disconnecting removes the session.
+
+### 3. Milvus for document RAG
+
+SQL chat and the database browser do not need Milvus or an embedding provider. The SQL tool explicitly disables embeddings to avoid LlamaIndex's default OpenAI provider lookup. Document uploads require a running Milvus instance at `MILVUS_URI` (default `http://localhost:19530`). The existing `standalone.bat`, `embedEtcd.yaml` and `user.yaml` are retained for local setup. First document upload may download the configured Hugging Face embedding model.
+
+## Configuration
+
+| Variable | Default |
+| --- | --- |
+| `LLM_MODEL` | `qwen/qwen3-30b-a3b-instruct-2507` |
+| `EMBEDDING_MODEL` | `BAAI/bge-small-en-v1.5` |
+| `MILVUS_URI` | `http://localhost:19530` |
+| `DATABASE_PATH` | `city_database.sqlite` |
+| `QUERY_TIMEOUT_SECONDS` | `60` |
+| `MAX_UPLOAD_MB` | `20` (combined files per request) |
+
+Supported uploads: PDF, DOCX, PPTX, TXT and Markdown. Reuploading a filename replaces its content. Each index caches up to 128 exact retrieval queries for 5 minutes; LLM answer synthesis still runs on every call.
+
+## API
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| GET | `/api/health` | Backend status and public configuration |
+| POST | `/api/sessions` | Connect using an API key or server configuration |
+| GET | `/api/sessions/{id}` | Restore chat and document metadata |
+| POST | `/api/sessions/{id}/chat` | Final answer, tool results and duration |
+| POST | `/api/sessions/{id}/documents` | Multipart upload, field name `files` |
+| POST | `/api/sessions/{id}/reset` | Clear conversation history |
+| DELETE | `/api/sessions/{id}` | Disconnect and clean up temporary files |
+| GET | `/api/database` | Paginated city data; `search`, `page`, `page_size` |
+
+## Verification
+
+```bash
+uv run python -m unittest discover -s tests -v
+cd frontend
+npm test
+npm run build
+```
+
+Backend tests cover the workflow, history, retrieval cache, loading, session isolation, upload rollback and HTTP contracts. Frontend tests cover connection, follow-ups, tool details, failed-query retry, uploads and expired sessions. These tests mock external model/Milvus calls; a complete live RAG run needs those services.
+
+## Current scope
+
+This is a local development application. Sessions live in one backend process, expire after 12 hours of inactivity and are lost on restart; use one worker. There is no user authentication or durable session store yet. Milvus collections are recreated on upload and are not automatically removed when sessions end. The database browser uses fixed read-only queries; hardening LLM-generated SQL remains a separate roadmap step.
+
+The notebooks are retained as tutorial references. The application uses the modules under `backend/rag/`.
 
 ## 📬 Stay Updated with Our Newsletter!
 
