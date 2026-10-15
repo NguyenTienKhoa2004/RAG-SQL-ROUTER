@@ -28,11 +28,11 @@ app.py                 Alias for the FastAPI application
 
 **Query flow:** React -> API -> session workflow -> SQL/document tools -> workflow final answer -> React. Tool results are returned separately and can be expanded in the chat. Each question starts a new tool lookup; prior conversation messages remain available to resolve follow-up references.
 
-**Document flow:** upload -> validate and stage files -> text extraction / OCR -> Markdown nodes -> embeddings -> Milvus -> document tool. A successful upload replaces the index and keeps chat history; a failed upload keeps the previous documents and workflow.
+**Document flow:** upload -> validate and stage files -> text extraction / OCR -> Markdown nodes -> dense embeddings + Milvus BM25 index -> hybrid retrieval with RRF -> document tool. A successful upload replaces the index, keeps chat history, and deletes the old Milvus collection. Cleanup failures are logged without failing the successful upload; a failed upload keeps the previous documents and workflow.
 
 ## Run locally
 
-Requirements: Python 3.12+, uv, Node.js 20+ and npm. Keep `city_database.sqlite` in the project root, or configure `DATABASE_PATH`.
+Requirements: Python 3.12+, uv, Node.js 20+ and npm. Create the sales dataset with `python migrate/seed_sales.py`, or configure `DATABASE_PATH` to a database with the same schema. See [migration instructions, policy documents and benchmark answers](migrate/README.md).
 
 ### 1. Backend
 
@@ -40,6 +40,7 @@ From the project root:
 
 ```bash
 uv sync
+uv run python migrate/seed_sales.py
 uv run uvicorn backend.api:app --reload --host 127.0.0.1 --port 8000
 ```
 
@@ -59,11 +60,34 @@ npm run dev
 
 Open http://127.0.0.1:5173. Vite proxies `/api` to port 8000. On Windows, use `npm.cmd` if PowerShell blocks `npm.ps1`.
 
-Connect the workspace, ask about cities, or add your documents through the sources panel. Enter sends a question; Shift + Enter adds a line. Starting a new conversation clears history and keeps uploaded documents. Disconnecting removes the session.
+Connect the workspace, ask about sales, or add your documents through the sources panel. Enter sends a question; Shift + Enter adds a line. Starting a new conversation clears history and keeps uploaded documents. Disconnecting removes the session.
 
 ### 3. Milvus for document RAG
 
-SQL chat and the database browser do not need Milvus or an embedding provider. The SQL tool explicitly disables embeddings to avoid LlamaIndex's default OpenAI provider lookup. Document uploads require a running Milvus instance at `MILVUS_URI` (default `http://localhost:19530`). The existing `standalone.bat`, `embedEtcd.yaml` and `user.yaml` are retained for local setup. First document upload may download the configured Hugging Face embedding model.
+SQL chat and the database browser do not need Milvus or an embedding provider. The SQL tool queries six related sales tables and explicitly disables embeddings to avoid LlamaIndex's default OpenAI provider lookup. Document uploads require Milvus at `MILVUS_URI` (default `http://localhost:19530`).
+
+With Docker Desktop running, start Milvus and Attu from the project root:
+
+```powershell
+docker compose up -d
+```
+
+Compose runs Milvus 3.0.2 with embedded etcd and local storage, and Attu 3.0.0. Attu starts after Milvus becomes healthy. Open http://localhost:3000 to inspect document text, metadata, indexes and collections; its preconfigured connection is `milvus:19530`, database `default`. Attu uses single-user mode (`ATTU_AUTH_MODE=none`), and all published ports bind to localhost for local development. Milvus's built-in monitoring UI is at http://localhost:9091/webui/.
+
+Milvus data stays in `volumes/milvus/`, the same directory used by `standalone.bat`. Attu settings stay in a Docker volume. Stop the services with `docker compose down`; their persisted data is retained. Use `docker compose ps` for status and `docker compose logs -f` for logs. Backend and frontend still run with the commands above.
+
+For a first-time switch from containers created by `standalone.bat` or `docker run`, stop the old containers and rename them before running Compose:
+
+```powershell
+docker stop milvus-standalone
+docker rename milvus-standalone milvus-standalone-legacy
+# Only if an old Attu container exists:
+docker stop attu
+docker rename attu attu-legacy
+docker compose up -d
+```
+
+The renamed containers are stopped backups. Use Compose for subsequent starts so that a legacy Milvus container does not run against the same data directory at the same time. The existing `embedEtcd.yaml` and `user.yaml` are mounted as configuration files. First document upload may download the configured Hugging Face embedding model. Reupload documents after enabling hybrid search to create a collection containing both dense vectors and the BM25 index.
 
 ## Configuration
 
@@ -72,7 +96,7 @@ SQL chat and the database browser do not need Milvus or an embedding provider. T
 | `LLM_MODEL` | `qwen/qwen3-30b-a3b-instruct-2507` |
 | `EMBEDDING_MODEL` | `BAAI/bge-small-en-v1.5` |
 | `MILVUS_URI` | `http://localhost:19530` |
-| `DATABASE_PATH` | `city_database.sqlite` |
+| `DATABASE_PATH` | `sales_database.sqlite` |
 | `QUERY_TIMEOUT_SECONDS` | `60` |
 | `MAX_UPLOAD_MB` | `20` (combined files per request) |
 
@@ -89,7 +113,7 @@ Supported uploads: PDF, DOCX, PPTX, TXT and Markdown. Reuploading a filename rep
 | POST | `/api/sessions/{id}/documents` | Multipart upload, field name `files` |
 | POST | `/api/sessions/{id}/reset` | Clear conversation history |
 | DELETE | `/api/sessions/{id}` | Disconnect and clean up temporary files |
-| GET | `/api/database` | Paginated city data; `search`, `page`, `page_size` |
+| GET | `/api/database` | Browse six sales tables; `table` (default `orders`), `search`, `page`, `page_size` |
 
 ## Verification
 

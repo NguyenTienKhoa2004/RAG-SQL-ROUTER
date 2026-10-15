@@ -38,12 +38,15 @@ class SessionView(BaseModel):
     available_tools: list[str]
 
 
+SalesTable = Literal["orders", "customers", "products", "order_items", "payments", "returns"]
+
+
 class DatabaseView(BaseModel):
-    table: str
+    table: SalesTable
     columns: list[str]
     rows: list[dict]
     total: int
-    total_population: int
-    states: int
+    total_customers: int
+    total_products: int
     page: int
     page_size: int

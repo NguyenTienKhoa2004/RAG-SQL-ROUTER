@@ -1,0 +1,68 @@
+name: rag-sql-router
+
+services:
+  milvus:
+    image: milvusdb/milvus:v3.0.2
+    container_name: milvus-standalone
+    command: ["milvus", "run", "standalone"]
+    restart: unless-stopped
+    stop_grace_period: 60s
+    security_opt:
+      - seccomp:unconfined
+    environment:
+      ETCD_USE_EMBED: "true"
+      ETCD_DATA_DIR: /var/lib/milvus/etcd
+      ETCD_CONFIG_PATH: /milvus/configs/embedEtcd.yaml
+      COMMON_STORAGETYPE: local
+      DEPLOY_MODE: STANDALONE
+    ports:
+      - "127.0.0.1:19530:19530"
+      - "127.0.0.1:9091:9091"
+    volumes:
+      - type: bind
+        source: ./volumes/milvus
+        target: /var/lib/milvus
+      - type: bind
+        source: ./embedEtcd.yaml
+        target: /milvus/configs/embedEtcd.yaml
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ./user.yaml
+        target: /milvus/configs/user.yaml
+        read_only: true
+        bind:
+          create_host_path: false
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9091/healthz"]
+      interval: 10s
+      timeout: 20s
+      start_period: 90s
+      retries: 12
+
+  attu:
+    image: zilliz/attu:v3.0.0
+    container_name: attu
+    restart: unless-stopped
+    depends_on:
+      milvus:
+        condition: service_healthy
+    environment:
+      ATTU_AUTH_MODE: none
+      MILVUS_ADDRESS: milvus:19530
+      MILVUS_NAME: Local Milvus
+      MILVUS_DATABASE: default
+    ports:
+      - "127.0.0.1:3000:3000"
+    volumes:
+      - attu-data:/data
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 10s
+      timeout: 10s
+      start_period: 30s
+      retries: 12
+
+volumes:
+  attu-data:

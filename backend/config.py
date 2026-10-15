@@ -21,7 +21,7 @@ class AppConfig:
 
     @classmethod
     def from_environment(cls):
-        database = Path(os.getenv("DATABASE_PATH", "city_database.sqlite"))
+        database = Path(os.getenv("DATABASE_PATH", "sales_database.sqlite"))
         return cls(
             database_path=database if database.is_absolute() else PROJECT_ROOT / database,
             milvus_uri=os.getenv("MILVUS_URI", "http://localhost:19530"),

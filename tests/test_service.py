@@ -133,6 +133,59 @@ class SessionServiceTests(unittest.IsolatedAsyncioTestCase):
             with self.subTest(name=name), self.assertRaises(ServiceError):
                 await self.service.upload(self.first.id, [(name, b"text")])
 
+    async def test_reupload_deletes_old_collection_after_switching_workflow(self):
+        session = self.service.get(self.first.id)
+        with patch("backend.service.setup_document_tool", new_callable=AsyncMock,
+                   return_value=tool("document_tool")) as build, patch(
+            "backend.service.delete_document_collection",
+        ) as delete:
+            await self.service.upload(session.id, [("policy.txt", b"Old policy")])
+            delete.assert_not_called()
+            old_collection = session.collection_name
+            old_workflow = session.workflow
+
+            def check_active_index(uri, collection_name):
+                self.assertEqual(collection_name, old_collection)
+                self.assertNotEqual(session.collection_name, old_collection)
+                self.assertIsNot(session.workflow, old_workflow)
+                self.assertEqual(Path(session.directory.name, "policy.txt").read_bytes(), b"New policy")
+
+            delete.side_effect = check_active_index
+            await self.service.upload(session.id, [("policy.txt", b"New policy")])
+            delete.assert_called_once_with(self.service.config.milvus_uri, old_collection)
+            self.assertEqual(session.collection_name, build.call_args.kwargs["collection_name"])
+
+    async def test_failed_reupload_does_not_delete_active_collection(self):
+        session = self.service.get(self.first.id)
+        with patch("backend.service.setup_document_tool", new_callable=AsyncMock,
+                   return_value=tool("document_tool")):
+            await self.service.upload(session.id, [("policy.txt", b"Old policy")])
+        old_collection = session.collection_name
+        old_workflow = session.workflow
+        with patch("backend.service.setup_document_tool", side_effect=RuntimeError("Index failed")), patch(
+            "backend.service.delete_document_collection",
+        ) as delete:
+            with self.assertRaises(ServiceError):
+                await self.service.upload(session.id, [("policy.txt", b"New policy")])
+            delete.assert_not_called()
+        self.assertEqual(session.collection_name, old_collection)
+        self.assertIs(session.workflow, old_workflow)
+        self.assertEqual(Path(session.directory.name, "policy.txt").read_bytes(), b"Old policy")
+
+    async def test_cleanup_failure_does_not_fail_successful_upload(self):
+        session = self.service.get(self.first.id)
+        with patch("backend.service.setup_document_tool", new_callable=AsyncMock,
+                   return_value=tool("document_tool")):
+            await self.service.upload(session.id, [("policy.txt", b"Old policy")])
+            old_collection = session.collection_name
+            with patch("backend.service.delete_document_collection", side_effect=RuntimeError("Milvus unavailable")), \
+                    self.assertLogs("backend.service", level="ERROR") as logs:
+                view = await self.service.upload(session.id, [("policy.txt", b"New policy")])
+        self.assertNotEqual(session.collection_name, old_collection)
+        self.assertEqual(view.available_tools, ["sql_tool", "document_tool"])
+        self.assertEqual(Path(session.directory.name, "policy.txt").read_bytes(), b"New policy")
+        self.assertIn(old_collection, logs.output[0])
+
     async def test_disconnect_removes_session_and_temporary_files(self):
         directory = self.service.get(self.first.id).directory.name
         await self.service.delete(self.first.id)

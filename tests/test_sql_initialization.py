@@ -1,9 +1,7 @@
 """Use the actual SQL engine, not a mocked factory, to catch provider fallback."""
 
-import sqlite3
 import tempfile
 import unittest
-from contextlib import closing
 from pathlib import Path
 from unittest.mock import patch
 
@@ -15,12 +13,15 @@ from backend.api import create_app
 from backend.config import AppConfig
 from backend.rag.sql_embedding import SQLOnlyEmbedding
 from backend.rag.tools import setup_sql_tool
+from migrate.seed_sales import migrate
 
 
 class SQLLLM(MockLLM):
     def complete(self, prompt, formatted=False, **kwargs):
         return CompletionResponse(
-            text="SQLQuery: SELECT population FROM city_stats WHERE city_name = 'Chicago';\nSQLResult:"
+            text="SQLQuery: SELECT SUM(p.amount_vnd) FROM payments p JOIN orders o "
+                 "ON o.order_id = p.order_id WHERE o.order_id = 'DH1004' "
+                 "AND p.status = 'succeeded';\nSQLResult:"
         )
 
 
@@ -28,11 +29,8 @@ class SQLInitializationTests(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
         self.addCleanup(self.directory.cleanup)
-        self.path = Path(self.directory.name, "cities.sqlite")
-        with closing(sqlite3.connect(self.path)) as database:
-            database.execute("CREATE TABLE city_stats (city_name TEXT, population INTEGER, state TEXT)")
-            database.execute("INSERT INTO city_stats VALUES ('Chicago', 2746388, 'Illinois')")
-            database.commit()
+        self.path = Path(self.directory.name, "sales.sqlite")
+        migrate(self.path)
 
     def test_session_creation_uses_real_sql_engine_without_any_embedding_provider(self):
         config = AppConfig(database_path=self.path)
@@ -61,10 +59,10 @@ class SQLInitializationTests(unittest.TestCase):
         ):
             tool = setup_sql_tool(str(self.path), llm=SQLLLM())
             try:
-                result = tool.call("What is Chicago's population?")
+                result = tool.call("How much was successfully paid for order DH1004?")
                 self.assertFalse(result.is_error, result.content)
-                self.assertEqual(result.raw_output.metadata["result"], [(2746388,)])
-                self.assertIn("SELECT population", result.raw_output.metadata["sql_query"])
+                self.assertEqual(result.raw_output.metadata["result"], [(690000,)])
+                self.assertIn("JOIN orders", result.raw_output.metadata["sql_query"])
                 self.assertIsNone(Settings._embed_model)
             finally:
                 tool.query_engine.sql_retriever._sql_database.engine.dispose()

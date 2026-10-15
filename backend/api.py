@@ -6,8 +6,8 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, File, Query, UploadFile
 from fastapi.responses import JSONResponse
 from .config import AppConfig
-from .database import read_city_database
-from .schemas import ChatMessage, ChatRequest, DatabaseView, SessionRequest, SessionView
+from .database import read_sales_database
+from .schemas import ChatMessage, ChatRequest, DatabaseView, SalesTable, SessionRequest, SessionView
 from .service import ServiceError, SessionService
 
 logger = logging.getLogger(__name__)
@@ -88,12 +88,13 @@ def create_app(config: AppConfig | None = None, service: SessionService | None =
     async def database(
         page: int = Query(1, ge=1), page_size: int = Query(20, ge=1, le=100),
         search: str = Query("", max_length=200),
+        table: SalesTable = Query("orders"),
     ):
         try:
-            return await asyncio.to_thread(read_city_database, config.database_path, page, page_size, search)
+            return await asyncio.to_thread(read_sales_database, config.database_path, page, page_size, search, table)
         except Exception:
             logger.exception("Database browser failed")
-            raise ServiceError("The city database is unavailable.", 503)
+            raise ServiceError("The sales database is unavailable. Run python migrate/seed_sales.py first.", 503)
 
     return app
 

@@ -4,9 +4,9 @@ import remarkGfm from 'remark-gfm'
 import { ArrowRight, ArrowUp, Check, ChevronDown, Copy, Database, FileText, Layers3, LoaderCircle, Plus, Sparkles } from 'lucide-react'
 
 const suggestions = [
-  { icon: Database, title: 'Khám phá dữ liệu', text: '5 thành phố có dân số cao nhất là những thành phố nào?', tag: 'SQL' },
+  { icon: Database, title: 'Khám phá dữ liệu', text: 'Đơn DH1004 đã thanh toán thành công bao nhiêu tiền?', tag: 'SQL' },
   { icon: FileText, title: 'Hỏi về tài liệu', text: 'Tóm tắt những nội dung chính trong tài liệu đã tải lên.', tag: 'RAG' },
-  { icon: Sparkles, title: 'Tiếp nối câu hỏi', text: 'Dân số Chicago là bao nhiêu?', tag: 'CONTEXT' },
+  { icon: Sparkles, title: 'Kết hợp dữ liệu', text: 'Đơn DH1002 có bị thu sai phí giao hàng theo chính sách không?', tag: 'SQL + RAG' },
 ]
 
 function Answer({ message }) {

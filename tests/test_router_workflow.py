@@ -68,6 +68,38 @@ class RouterWorkflowTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("document_tool", rendered)
         self.assertNotIn("Trust Score", rendered)
 
+    async def test_document_policy_can_be_followed_by_sql_in_the_same_turn(self):
+        policy = Mock(return_value={"response": "September standard shipping is free from 500000 VND."})
+        facts = Mock(return_value="DH1002: merchandise 600000 VND, shipping charged 30000 VND.")
+
+        def search_policy(query: str):
+            return policy(query)
+
+        def search_sales(query: str):
+            return facts(query)
+
+        llm = self.make_llm()
+        llm.achat_with_tools.side_effect = [
+            ChatResponse(message=ChatMessage(role="assistant", content=value))
+            for value in ("", "", "DH1002 was overcharged 30000 VND.")
+        ]
+        llm.get_tool_calls_from_response.side_effect = [
+            [ToolSelection(tool_id="policy", tool_name="document_tool", tool_kwargs={"query": "September shipping rules?"})],
+            [ToolSelection(tool_id="facts", tool_name="sql_tool", tool_kwargs={"query": "DH1002 merchandise and shipping fee?"})],
+            [],
+        ]
+        workflow = RouterOutputAgentWorkflow(tools=[
+            FunctionTool.from_defaults(search_policy, name="document_tool"),
+            FunctionTool.from_defaults(search_sales, name="sql_tool"),
+        ], llm=llm)
+        answer = await workflow.run(message="Was DH1002 charged the correct shipping fee?")
+        self.assertEqual(answer, "DH1002 was overcharged 30000 VND.")
+        self.assertEqual([tool.name for tool in collect_tool_results(workflow.current_turn_history)],
+                         ["document_tool", "sql_tool"])
+        facts.assert_called_once()
+        second_prompt = llm.achat_with_tools.call_args_list[1].kwargs["chat_history"]
+        self.assertTrue(any(message.role == "tool" and "500000" in message.content for message in second_prompt))
+
     async def test_missing_tool_call_reports_failure_without_fabricated_metadata(self):
         def search(query: str):
             raise AssertionError("should not be called")

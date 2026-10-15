@@ -1,0 +1,47 @@
+{
+  "dataset": "BEIR NQ small subset",
+  "sources": {
+    "corpus": "https://public.ukp.informatik.tu-darmstadt.de/thakur/BEIR/datasets/nq.zip",
+    "queries": "https://huggingface.co/datasets/BeIR/nq/resolve/main/queries/queries-00000-of-00001.parquet",
+    "qrels": "https://huggingface.co/datasets/BeIR/nq-qrels/resolve/main/test.tsv"
+  },
+  "selection": "First 500 positive-qrels test query IDs in numeric order; all their positively labeled corpus passages; no extra distractors.",
+  "queries": 500,
+  "corpus": 623,
+  "qrels": 623,
+  "compressed_corpus_bytes_read": 3801088,
+  "note": "For RAG demonstration only. Retrieval on this subset is easier than full NQ and is not a full BEIR evaluation.",
+  "files": {
+    "corpus.md": {
+      "bytes": 401827,
+      "sha256": "52da38fae6811d935175359a28c4f55b6757c628b3de7525f80e87eedc2aeb4f"
+    },
+    "corpus.parquet": {
+      "bytes": 187916,
+      "sha256": "33ce891a37b3cb85e8bd95e5aa2b34aed5b0475a9abd312153afe2d04e400887"
+    },
+    "qrels.parquet": {
+      "bytes": 4499,
+      "sha256": "b720289e2a98d542303561b9d79235268b0f9351e32bf4d2a11368d77cd5b635"
+    },
+    "queries.parquet": {
+      "bytes": 14487,
+      "sha256": "4b5faa982e341cec02de44f8b5220f1e40163dd75f1e782e329224306c971014"
+    },
+    "sample-questions.md": {
+      "bytes": 3076,
+      "sha256": "d6b52dfd724ed2ab321cd45b162f5f0669d145b716a05fc47af0d854ca245240"
+    },
+    "README.md": {
+      "bytes": 2135,
+      "sha256": "e262e9910d31b75c5aef715fccd47920f65fed2204b1b178c042fee057cf764a"
+    }
+  },
+  "verified": {
+    "unique_ids": true,
+    "qrels_references_valid": true,
+    "every_query_has_source": true,
+    "markdown_nodes": 623,
+    "file_checksums_valid": true
+  }
+}

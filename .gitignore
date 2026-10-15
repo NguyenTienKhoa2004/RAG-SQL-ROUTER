@@ -20,6 +20,8 @@ volumes/
 *.sqlite-journal
 *.sqlite-wal
 *.sqlite-shm
+sales_database.sqlite
+migrate/*.sqlite
 
 # Notebook checkpoints and build output
 .ipynb_checkpoints/

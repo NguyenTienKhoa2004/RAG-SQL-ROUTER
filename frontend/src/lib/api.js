@@ -34,5 +34,5 @@ export const api = {
     files.forEach((file) => body.append('files', file))
     return request(`/sessions/${id}/documents`, { method: 'POST', body })
   },
-  database: ({ page = 1, search = '' }, signal) => request(`/database?${new URLSearchParams({ page, search })}`, { signal }),
+  database: ({ page = 1, search = '', table = 'orders' }, signal) => request(`/database?${new URLSearchParams({ page, search, table })}`, { signal }),
 }

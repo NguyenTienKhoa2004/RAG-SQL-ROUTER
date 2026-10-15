@@ -1,28 +1,22 @@
 """HTTP contracts and fixed database browsing; no paid LLM calls needed."""
 import os
-import sqlite3
 import tempfile
 import unittest
-from contextlib import closing
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 from fastapi.testclient import TestClient
 from backend.api import create_app
 from backend.config import AppConfig
 from backend.service import SessionService
+from migrate.seed_sales import migrate
 from test_service import StubWorkflow, tool
 
 
 class ApiTests(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
-        path = Path(self.directory.name, "cities.sqlite")
-        with closing(sqlite3.connect(path)) as database:
-            database.execute("CREATE TABLE city_stats (city_name TEXT, population INTEGER, state TEXT)")
-            database.executemany("INSERT INTO city_stats VALUES (?, ?, ?)", [
-                ("Chicago", 2746388, "Illinois"), ("Boston", 675647, "Massachusetts"),
-            ])
-            database.commit()
+        path = Path(self.directory.name, "sales.sqlite")
+        migrate(path)
         config = AppConfig(database_path=path, max_upload_bytes=20)
         self.service = SessionService(config)
         self.client = TestClient(create_app(config, self.service))
@@ -47,18 +41,62 @@ class ApiTests(unittest.TestCase):
 
     def test_health_and_database_work_before_connecting(self):
         self.assertEqual(self.client.get("/api/health").status_code, 200)
-        response = self.client.get("/api/database?search=Chicago&page_size=1")
+        response = self.client.get("/api/database?search=DH1004&page_size=1")
         self.assertEqual(response.status_code, 200)
         body = response.json()
         self.assertEqual(body["total"], 1)
-        self.assertEqual(body["rows"][0]["state"], "Illinois")
-        self.assertEqual(body["states"], 2)
+        self.assertEqual(body["rows"][0]["order_id"], "DH1004")
+        self.assertEqual(body["rows"][0]["merchandise_total_vnd"], 690000)
+        self.assertEqual(body["total_customers"], 120)
+        self.assertEqual(body["total_products"], 12)
+        self.assertEqual(body["table"], "orders")
+
+    def test_database_pagination_and_customer_search(self):
+        first = self.client.get("/api/database?page_size=10").json()
+        second = self.client.get("/api/database?page_size=10&page=2").json()
+        self.assertEqual(first["total"], 608)
+        self.assertEqual(len(first["rows"]), 10)
+        self.assertFalse({r["order_id"] for r in first["rows"]} & {r["order_id"] for r in second["rows"]})
+        rows = self.client.get("/api/database?search=KH001").json()["rows"]
+        self.assertTrue(rows)
+        self.assertTrue(all(row["customer_id"] == "KH001" for row in rows))
 
     def test_database_search_is_parameterized_and_pagination_is_validated(self):
         response = self.client.get("/api/database", params={"search": "' OR 1=1 --"})
         self.assertEqual(response.json()["total"], 0)
         self.assertEqual(self.client.get("/api/database?page=0").status_code, 422)
         self.assertEqual(self.client.get("/api/database?page_size=1000").status_code, 422)
+
+    def test_all_sales_tables_support_browsing_search_and_pagination(self):
+        for table, count, primary_key, search in [
+            ("orders", 608, "order_id", "DH1004"),
+            ("customers", 120, "customer_id", "KH001"),
+            ("products", 12, "product_id", "SP01"),
+            ("order_items", 1496, "order_item_id", "DH1004"),
+            ("payments", 653, "payment_id", "DH1004"),
+            ("returns", 6, "return_id", "refunded"),
+        ]:
+            with self.subTest(table=table):
+                first = self.client.get("/api/database", params={"table": table, "page_size": 2})
+                self.assertEqual(first.status_code, 200, first.text)
+                body = first.json()
+                self.assertEqual(body["table"], table)
+                self.assertEqual(body["total"], count)
+                self.assertEqual(body["columns"][0], primary_key)
+                self.assertEqual(set(body["columns"]), set(body["rows"][0]))
+                second = self.client.get("/api/database", params={"table": table, "page_size": 2, "page": 2}).json()
+                self.assertFalse({r[primary_key] for r in body["rows"]} & {r[primary_key] for r in second["rows"]})
+                matches = self.client.get("/api/database", params={"table": table, "search": search}).json()
+                self.assertGreater(matches["total"], 0)
+                self.assertTrue(all(any(search in str(value) for value in row.values()) for row in matches["rows"]))
+                injected = self.client.get("/api/database", params={"table": table, "search": "' OR 1=1 --"})
+                self.assertEqual(injected.json()["total"], 0)
+
+    def test_database_table_allowlist_and_null_values(self):
+        for table in ("sqlite_master", "orders; DROP TABLE orders;--", "unknown"):
+            self.assertEqual(self.client.get("/api/database", params={"table": table}).status_code, 422)
+        body = self.client.get("/api/database?table=orders&search=DH1005").json()
+        self.assertIsNone(body["rows"][0]["delivered_at"])
 
     def test_chat_reset_restore_and_disconnect_contract(self):
         session_id = self.connect()

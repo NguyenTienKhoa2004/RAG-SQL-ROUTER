@@ -1,5 +1,6 @@
 """Session orchestration. No HTTP or UI dependencies live in this module."""
 import asyncio
+import logging
 import os
 import shutil
 from dataclasses import dataclass, field
@@ -9,10 +10,12 @@ from tempfile import TemporaryDirectory
 from time import monotonic, perf_counter
 from uuid import uuid4
 from .config import AppConfig
-from .rag.tools import setup_document_tool, setup_sql_tool
+from .rag.tools import delete_document_collection, setup_document_tool, setup_sql_tool
 from .rag.workflow import RouterOutputAgentWorkflow
 from .schemas import ChatMessage, DocumentInfo, SessionView
 from .serialization import collect_tool_results
+
+logger = logging.getLogger(__name__)
 
 
 class ServiceError(Exception):
@@ -43,6 +46,7 @@ class Session:
     messages: list[ChatMessage] = field(default_factory=list)
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     touched: float = field(default_factory=monotonic)
+    collection_name: str | None = None
 
 
 class SessionService:
@@ -64,7 +68,7 @@ class SessionService:
         if not key:
             raise ServiceError("Enter an OpenRouter API key to connect your workspace.")
         if not self.config.database_path.is_file():
-            raise ServiceError("The configured city database is missing.", 503)
+            raise ServiceError("The sales database is missing. Run python migrate/seed_sales.py first.", 503)
         llm = create_llm(key, self.config.llm_model)
         sql_tool = setup_sql_tool(str(self.config.database_path), llm=llm)
         session_id = uuid4().hex
@@ -134,6 +138,7 @@ class SessionService:
                 raise ServiceError(f"{name} is empty.")
         async with session.lock:
             staging = TemporaryDirectory()
+            collection_name = f"rag_with_sql_{uuid4().hex}"
             try:
                 # Build a replacement index before touching the active session.
                 shutil.copytree(session.directory.name, staging.name, dirs_exist_ok=True)
@@ -146,6 +151,7 @@ class SessionService:
                 document_tool = await setup_document_tool(
                     staging.name, self.config.milvus_uri, llm=session.llm,
                     embed_model=embed_model,
+                    collection_name=collection_name,
                 )
                 workflow = RouterOutputAgentWorkflow(
                     tools=[session.sql_tool, document_tool], llm=session.llm,
@@ -157,11 +163,21 @@ class SessionService:
                     "Document processing failed. Check the file contents and Milvus connection.", 502,
                 ) from exc
             old_directory = session.directory
+            old_collection_name = session.collection_name
             session.directory = staging
             session.documents = documents
             session.workflow = workflow
+            session.collection_name = collection_name
             session.touched = monotonic()
             old_directory.cleanup()
+            # Only delete the old index after the new workflow is active.
+            if old_collection_name:
+                try:
+                    await asyncio.to_thread(
+                        delete_document_collection, self.config.milvus_uri, old_collection_name,
+                    )
+                except Exception:
+                    logger.exception("Could not delete old document collection %s", old_collection_name)
             return self.view(session)
 
     async def reset(self, session_id):

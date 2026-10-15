@@ -1,0 +1,56 @@
+{
+  "dataset": "BEIR SciFact",
+  "source_url": "https://public.ukp.informatik.tu-darmstadt.de/thakur/BEIR/datasets/scifact.zip",
+  "source_md5": "5f7d1de60b170fc8027bb7898e2efca1",
+  "compression": "zstd",
+  "metadata_encoding": "JSON string",
+  "files": {
+    "corpus.parquet": {
+      "rows": 5183,
+      "columns": [
+        "_id",
+        "title",
+        "text",
+        "metadata"
+      ],
+      "bytes": 3087423,
+      "sha256": "4facef7c0b688199c50152eb87c273562d6c0b233007563a16166a904c8c1174"
+    },
+    "queries.parquet": {
+      "rows": 1109,
+      "columns": [
+        "_id",
+        "text",
+        "metadata"
+      ],
+      "bytes": 51683,
+      "sha256": "66f51126f71f05a77a4a8bf63418cfbd57b1f9eaee0dc2ef1a9f5798782892d2"
+    },
+    "qrels.parquet": {
+      "rows": 1258,
+      "columns": [
+        "query_id",
+        "corpus_id",
+        "score",
+        "split"
+      ],
+      "bytes": 9376,
+      "sha256": "cce02867015c279fcd7093bc4a747da97d8d19ba6885af336cf1f8d228a40a44"
+    }
+  },
+  "splits": {
+    "train": {
+      "qrels": 919,
+      "queries": 809
+    },
+    "test": {
+      "qrels": 339,
+      "queries": 300
+    }
+  },
+  "verified": {
+    "source_round_trip_equal": true,
+    "unique_ids": true,
+    "qrels_references_valid": true
+  }
+}

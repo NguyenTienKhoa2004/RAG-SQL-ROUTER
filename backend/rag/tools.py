@@ -16,6 +16,8 @@ from llama_index.core.tools import QueryEngineTool, FunctionTool
 from llama_index.core.node_parser import MarkdownNodeParser
 from .document_loading import load_uploaded_documents
 from llama_index.vector_stores.milvus import MilvusVectorStore
+from llama_index.vector_stores.milvus.utils import BM25BuiltInFunction
+from pymilvus import MilvusClient
 from .retrieval_cache import RetrievalCache
 from .sql_embedding import SQLOnlyEmbedding
 
@@ -23,15 +25,31 @@ from .sql_embedding import SQLOnlyEmbedding
 #####################################
 # Define Tools for Router Agent
 #####################################
-def setup_sql_tool(db_path="city_database.sqlite", table_name="city_stats", *, llm=None):
-    """Setup SQL query tool for querying city database."""
+SALES_TABLE_CONTEXT = {
+    "customers": "Synthetic customers. Names may be duplicated; identify customers by customer_id.",
+    "products": "Catalog. list_price_vnd is not the historical sale price. Categories: apparel, electronics, home.",
+    "orders": "ISO date strings. NULL delivered_at means missing data. membership_at_purchase and shipping_region "
+              "are historical snapshots. shipping_fee_vnd is the actual charged fee, not the policy rule.",
+    "order_items": "Historical sale prices in integer VND. discount_vnd is the TOTAL discount for the entire line, "
+                   "not per unit. Merchandise value = quantity * unit_price_vnd - discount_vnd. "
+                   "is_clearance identifies clearance items.",
+    "payments": "Purchase payments, including shipping. Count only status=succeeded. An order may have failed "
+                "attempts and multiple successful installments. Refunds are recorded only in returns.",
+    "returns": "Return requests linked to order_items. Only status=refunded is an actual refund; "
+               "refund_amount_vnd is the total refund for that request. requested_at differs from refunded_at. "
+               "Reason, item_condition, quantity and dates are facts; eligibility rules require document_tool.",
+}
+
+
+def setup_sql_tool(db_path="sales_database.sqlite", *, llm=None):
+    """Setup text-to-SQL across the six sales tables."""
     # Validate database exists
     if not os.path.exists(db_path):
         raise FileNotFoundError(f"Database file not found: {db_path}")
 
     try:
         engine = create_engine(f"sqlite:///{db_path}")
-        sql_database = SQLDatabase(engine)
+        sql_database = SQLDatabase(engine, include_tables=list(SALES_TABLE_CONTEXT))
     except Exception as e:
         print(f"Error setting up SQL database: {e}")
         raise
@@ -39,9 +57,10 @@ def setup_sql_tool(db_path="city_database.sqlite", table_name="city_stats", *, l
     # Create SQL query engine
     sql_query_engine = NLSQLTableQueryEngine(
         sql_database=sql_database,
-        tables=[table_name],
+        tables=list(SALES_TABLE_CONTEXT),
+        context_query_kwargs=SALES_TABLE_CONTEXT,
         llm=llm,
-        # Fixed-table text-to-SQL needs no embeddings. Supply an explicit guard
+        # Fixed-schema text-to-SQL needs no embeddings. Supply an explicit guard
         # because NLSQLRetriever otherwise loads Settings.embed_model eagerly.
         embed_model=SQLOnlyEmbedding(),
     )
@@ -51,9 +70,12 @@ def setup_sql_tool(db_path="city_database.sqlite", table_name="city_stats", *, l
         query_engine=sql_query_engine,
         name="sql_tool",
         description=(
-            "Useful for translating a natural language query into a SQL query over"
-            " a table containing: city_stats, containing the population/state of"
-            " each city located in the USA."
+            "Query the synthetic sales database: customers, products, orders, order_items, payments, returns. "
+            "Use for order facts, sales totals, dates, customers, products, payments and refunds. All money is VND. "
+            "Aggregate each child table before joining to avoid multiplying amounts. Net merchandise revenue "
+            "for orders placed in a period counts delivered orders, subtracts actual refunds linked to those "
+            "orders, and excludes shipping. Cash flow instead uses payment/refund transaction dates. "
+            "Policies and eligibility rules must come from document_tool; combine both tools when needed."
         ),
     )
 
@@ -61,7 +83,18 @@ def setup_sql_tool(db_path="city_database.sqlite", table_name="city_stats", *, l
     return sql_tool
 
 
-async def setup_document_tool(file_dir, milvus_uri="http://localhost:19530", *, llm=None, embed_model=None):
+def delete_document_collection(milvus_uri, collection_name):
+    """Remove a replaced document index and close the cleanup connection."""
+    client = MilvusClient(uri=milvus_uri, timeout=5)
+    try:
+        client.drop_collection(collection_name, timeout=5)
+    finally:
+        client.close()
+
+
+async def setup_document_tool(
+    file_dir, milvus_uri="http://localhost:19530", *, llm=None, embed_model=None, collection_name=None,
+):
     """Setup document query tool from uploaded documents."""
 
     # Create a reader and load the data
@@ -69,8 +102,7 @@ async def setup_document_tool(file_dir, milvus_uri="http://localhost:19530", *, 
     docs = await asyncio.to_thread(load_uploaded_documents, file_dir)
 
     # Creating a vector index over loaded data
-    unique_collection_id = uuid.uuid4().hex
-    collection_name = f"rag_with_sql_{unique_collection_id}"
+    collection_name = collection_name or f"rag_with_sql_{uuid.uuid4().hex}"
     embed_model = embed_model or Settings.embed_model
     embedding_dim = len(await asyncio.to_thread(embed_model.get_text_embedding, "dimension probe"))
     # MilvusVectorStore also constructs AsyncMilvusClient. Initialize it on the
@@ -80,6 +112,9 @@ async def setup_document_tool(file_dir, milvus_uri="http://localhost:19530", *, 
         dim=embedding_dim,
         overwrite=True,
         collection_name=collection_name,
+        enable_sparse=True,
+        sparse_embedding_function=BM25BuiltInFunction(),
+        hybrid_ranker="RRFRanker",
     )
     storage_context = StorageContext.from_defaults(vector_store=vector_store)
     vector_index = await asyncio.to_thread(
@@ -109,7 +144,10 @@ async def setup_document_tool(file_dir, milvus_uri="http://localhost:19530", *, 
 
     # Create a query engine for the vector index
     docs_query_engine = vector_index.as_query_engine(
-        text_qa_template=qa_template, similarity_top_k=3, llm=llm
+        text_qa_template=qa_template,
+        similarity_top_k=3,
+        vector_store_query_mode="hybrid",
+        llm=llm,
     )
     # Keep the engine and retrieved nodes local to this tool's document index.
     retrieval_cache = RetrievalCache(
@@ -132,11 +170,12 @@ async def setup_document_tool(file_dir, milvus_uri="http://localhost:19530", *, 
         document_query_tool,
         name="document_tool",
         description=(
-            "Useful for answering a natural language question by performing a semantic search over "
+            "Useful for answering a natural language question by performing hybrid semantic and keyword search over "
             "uploaded documents, including store policies, order values for free shipping, "
             "delivery fees, opening hours, returns and payments. Documents may contain general knowledge, reports, "
             "or domain-specific content. Returns the most relevant passages or synthesized answers. "
-            "If the user query does not relate to US city statistics (population and state), use this document search tool."
+            "Use this tool for policy rules and effective dates, not for actual sales transactions or totals. "
+            "For order eligibility or shipping audits, combine document policies with facts from sql_tool."
         ),
     )
 

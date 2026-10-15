@@ -169,6 +169,11 @@ nav { display: flex; flex-direction: column; gap: 5px; }
 .table-toolbar { display: flex; align-items: center; justify-content: space-between; padding: 17px 21px; border-bottom: 1px solid var(--line); }
 .table-toolbar > div { display: flex; gap: 9px; align-items: center; font-size: 13px; color: #978aa9; }
 .table-toolbar strong { color: #5c546a; font-weight: 500; }
+.table-toolbar { flex-wrap: wrap; gap: 12px; }
+.table-toolbar select { max-width: 100%; min-width: 0; padding: 8px; border: 1px solid #e9e2f0; border-radius: 6px; color: #5c546a; background: white; font: inherit; }
+.table-toolbar > div { max-width: 100%; min-width: 0; }
+.table-note { margin: 0 20px 15px; font-size: 12px; color: #97929f; }
+.table-overflow th, .table-overflow td { white-space: nowrap; }
 .table-toolbar span { font-size: 10px; background: #f5f1f9; padding: 3px 6px; border-radius: 3px; }
 .table-search { margin: 15px 20px; display: flex; align-items: center; gap: 9px; padding: 10px 12px; background: #faf9fc; border: 1px solid #eeebf3; border-radius: 6px; color: #b0a4be; max-width: 340px; }
 .table-search input { width: 100%; border: 0; background: transparent; font-size: 12px; color: #6f617e; }
